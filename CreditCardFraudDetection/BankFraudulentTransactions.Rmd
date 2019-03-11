@@ -1,0 +1,228 @@
+---
+title: "Bank Detect Fraudulent"
+output: html_document
+author: Martin Kovarik
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reticulate)
+use_python("C:/Users/Martin/AppData/Local/Programs/Python/Python36/python")
+# https://martinkabe.github.io/ML/CreditCardFraudDetection/BankFraudulentTransactions.html
+```
+
+It is important that credit card companies are able to recognize fraudulent credit card transactions so that customers are not charged for items that they did not purchase.
+
+# Table of Contents
+1. [Data Set Description](#dsdesc)
+2. [Exploratory Data Analysis](#EDA)
+3. [Split the Data into Training and Test](#datasplit)
+4. [Modelling Part](#modelling)
+5. [Presentation Layer](#presentationLayer)
+
+```{python, echo=FALSE}
+import sys
+import numpy
+import pandas
+import matplotlib
+import seaborn
+import scipy
+
+print('Python: {}'.format(sys.version))
+print('Numpy: {}'.format(numpy.__version__))
+print('Pandas: {}'.format(pandas.__version__))
+print('Matplotlib: {}'.format(matplotlib.__version__))
+print('Seaborn: {}'.format(seaborn.__version__))
+print('Scipy: {}'.format(scipy.__version__))
+
+# import the necessary packages
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+```
+
+
+## Data Set Description <a name="dsdesc"></a>
+The datasets contains transactions made by credit cards in September 2013 by european cardholders. This dataset presents transactions that occurred in two days, where we have 492 frauds out of 284,807 transactions. The dataset is highly unbalanced, the positive class (frauds) account for 0.172% of all transactions.
+
+It contains only numerical input variables which are the result of a PCA transformation. Unfortunately, due to confidentiality issues, we cannot provide the original features and more background information about the data. Features V1, V2, ... V28 are the principal components obtained with PCA, the only features which have not been transformed with PCA are 'Time' and 'Amount'. Feature 'Time' contains the seconds elapsed between each transaction and the first transaction in the dataset. The feature 'Amount' is the transaction Amount, this feature can be used for example-dependant cost-senstive learning. Feature 'Class' is the response variable and it takes value 1 in case of fraud and 0 otherwise. The entire data set is available at [link](https://www.kaggle.com/mlg-ulb/creditcardfraud).
+
+We will demonstrate the application of Machine Learning modelling for classification problem where we want to classify 'Class' feature depends on the rest of the independent variables in 'creditcardfraud.csv' data set.
+
+## Exploratory Data Analysis <a name="EDA"></a>
+```{python}
+# Load the dataset from the csv file using pandas
+data = pd.read_csv('D:\Python\AlphaIT\CreditCardFraudDetection\Credit Card Fraud Detection\creditcard.csv')
+
+print("Data Set contains of {0} rows and {1} columns".format(data.shape[0], data.shape[1]))
+print(data.head())
+print(data['Class'].describe())
+```
+
+```{python, echo = FALSE, out.width="60%", fig.align="center"}
+fraction = len(data[data['Class']==1])/float(len(data[data['Class']==0]))
+plt.hist(data['Class'], facecolor='blue', alpha=0.75)
+plt.xlabel('Class')
+plt.ylabel('Count')
+plt.title(r'Distribution of counts for Class variable')
+plt.text(0.5, 150000, "Fraudulent cases: {0}\nValid cases: {1}\nOutlier fraction is {2}".format(len(data[data['Class']==1]), 
+         len(data[data['Class']==0]),
+         str(round(len(data[data['Class']==1])/float(len(data[data['Class']==0]))*100, 3)) + ' %'), horizontalalignment='center', verticalalignment='center')
+plt.show()
+```
+
+
+## Split the data into training and test <a name="datasplit"></a>
+```{python, out.width="60%", fig.align="center"}
+train_data = data.sample(frac = 0.1, random_state = 1)
+
+## Determine dependent and independent variables
+columns = train_data.columns.tolist()
+columns = [c for c in columns if c not in ['Class']]
+target = 'Class'
+X = train_data[columns]
+Y = train_data[target]
+
+cormat = train_data.corr()
+sns.heatmap(cormat, vmax = .8, square = True)
+plt.title(r'Correlation matrix')
+plt.show()
+```
+
+## Modelling Part <a name="modelling"></a>
+```{python}
+from sklearn.metrics import classification_report, accuracy_score
+from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB
+
+# define a random state
+state = 1
+
+# define outlier detection tools to be compared
+classifiers = {
+    "Isolation Forest": IsolationForest(max_samples=len(X),
+                                        contamination=fraction,
+                                        random_state=state),
+    "Local Outlier Factor": LocalOutlierFactor(
+        n_neighbors=20,
+        contamination=fraction),
+    "K-NN": KNeighborsClassifier(n_neighbors=20),
+    "Logistic Regression": LogisticRegression(random_state=state, solver='lbfgs',
+                                              multi_class='multinomial'),
+    "Naive Bayes": GaussianNB()
+}
+```
+
+Fit the models:
+```{python}
+n_outliers = len(data[data['Class']==1])
+
+for i, (clf_name, clf) in enumerate(classifiers.items()):
+    # fit the data and tag outliers
+    if clf_name == "Local Outlier Factor":
+        y_pred = clf.fit_predict(X)
+        scores_pred = clf.negative_outlier_factor_
+    elif clf_name == "Isolation Forest":
+        clf.fit(X)
+        scores_pred = clf.decision_function(X)
+        y_pred = clf.predict(X)
+    elif clf_name == 'K-NN':
+        clf.fit(X, Y)
+        y_pred = clf.predict(X)
+    elif clf_name == 'Logistic Regression':
+        clf.fit(X, Y)
+        y_pred = clf.predict(X)
+    elif clf_name == 'Naive Bayes':
+        clf.fit(X, Y)
+        y_pred = clf.predict(X)
+        
+    
+    # Reshape the prediction values to 0 for valid, 1 for fraud.
+    if clf_name == "Local Outlier Factor" or clf_name == "Isolation Forest":
+        y_pred[y_pred == 1] = 0
+        y_pred[y_pred == -1] = 1
+    
+    n_errors = (y_pred != Y).sum()
+    
+    # Run classification metrics
+    # print('{}: {}'.format(clf_name, n_errors))
+    # print(accuracy_score(Y, y_pred))
+    # print(classification_report(Y, y_pred))
+```
+
+**Isolation Forest:**
+Incorrectly classified: 71
+Accuracy Score: 0.99750711000316
+
+|   | **Precision** | **Recall** | **f1-Score** | **Support** |
+|---|-----------|--------|----------|---------|
+| 0 | 1.00      | 1.00   | 1.00     | 28432   |
+| 1 | 0.28      | 0.29   | 0.28     | 49      |
+
+
+**Local Outlier Factor:**
+Incorrectly classified: 97
+Accuracy Score: 0.9965942207085425
+
+|   | **Precision** | **Recall** | **f1-Score** | **Support** |
+|---|-----------|--------|----------|---------|
+| 0 | 1.00      | 1.00   | 1.00     | 28432   |
+| 1 | 0.02      | 0.02   | 0.02     | 49      |
+
+**K-NN:**
+Incorrectly classified: 49
+Accuracy Score: 0.9982795547909132
+
+|   | **Precision** | **Recall** | **f1-Score** | **Support** |
+|---|-----------|--------|----------|---------|
+| 0 | 1.00      | 1.00   | 1.00     | 28432   |
+| 1 | 0.00      | 0.00   | 0.00     | 49      |
+
+**Logistic Regression:**
+Incorrectly classified: 36
+Accuracy Score: 0.998735999438222
+
+|   | **Precision** | **Recall** | **f1-Score** | **Support** |
+|---|-----------|--------|----------|---------|
+| 0 | 1.00      | 1.00   | 1.00     | 28432   |
+| 1 | 0.68      | 0.51   | 0.58     | 49      |
+
+**Naive Bayes:**
+Incorrectly classified: 241
+Accuracy Score: 0.9915382184614304
+
+|   | **Precision** | **Recall** | **f1-Score** | **Support** |
+|---|-----------|--------|----------|---------|
+| 0 | 1.00      | 0.99   | 1.00     | 28432   |
+| 1 | 0.12      | 0.63   | 0.20     | 49      |
+
+We could of course have the best score with KNN - 1, 1-NN respectively. But this is misleading - see the note below.
+
+```{python, out.width="70%", fig.align="center"}
+error = []
+# Calculating error for K values between 1 and 40
+for i in range(1, 40):  
+    knn = KNeighborsClassifier(n_neighbors=i)
+    knn.fit(X, Y)
+    pred_i = knn.predict(X)
+    error.append(np.mean(pred_i != Y))
+
+plt.figure(figsize=(12, 6))  
+plt.plot(range(1, 40), error, color='red', linestyle='dashed', marker='o',  
+         markerfacecolor='blue', markersize=10)
+plt.title('Error Rate K Value')  
+plt.xlabel('K Value')  
+plt.ylabel('Mean Error')
+plt.show()
+```
+
+*Note to 1NN:*
+The variance is high in this case, because optimizing on only 1-nearest point means that the probability that we model the noise in our data is really high. For *1-NN* this point depends only of 1 single other point. E.g. we want to split our samples into two groups (classification) - red and blue. If we train our model for a certain point *p* for which the nearest 4 neighbors would be red, blue, blue, blue (ascending by distance to p). Then a *4-NN* would classify our point to blue (3 times blue and 1 time red), but our *1-NN* model classifies it to red, because red is the nearest point. This means, that our model is really close to our training data and therefore the bias is low. If we compute the **RSS** between our model and our training data it is close to 0. In contrast to this the variance in our model is high, because our model is extremely sensitive and wiggly.
+
+## Presentation Layer <a name="presentationLayer"></a>
+- markdown
+- html
+- javascript
