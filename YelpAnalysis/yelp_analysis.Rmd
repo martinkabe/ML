@@ -1,0 +1,151 @@
+---
+title: "Yelp Analysis"
+author: "Martin Kovarik"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE,
+	collapse = TRUE
+)
+# library(reticulate)
+```
+
+## Short Yelp Analysis {.tabset}
+
+### Intro
+
+<h2>Dataset description:</h2>
+
+<p>Yelp is a local business directory service and review site with social networking features. It allows users to give ratings and review businesses. The review is usually short text consisting of few lines with about hundred words. Often, a review describes various dimensions about a business and the experience of user with respect to those dimensions.This dataset is a subset of Yelp's businesses, reviews, and user data. It was originally put together for the Yelp Dataset Challenge which is a chance for students to conduct research or analysis on Yelp's data and share their discoveries. In the dataset you'll find information about businesses across 11 metropolitan areas in four countries.
+<i><b>Source:</b> <a href="https://www.kaggle.com">Kaggle</a></i></p>
+
+</br>
+<p>Used Data Sources:</p>
+<ul>
+  <li>-rw-r--r-- 1 martin martin  138279749 lis 15  2018 business.json</li>
+  <li>-rw-r--r-- 1 martin martin 5347475638 lis 15  2018 review.json</li>
+</ul>
+
+</br></br>
+<p>Loading R packages ...</p>
+```{r loadPackages, echo=TRUE}
+library(jsonlite) # install.packages("jsonlite")
+library(tidyverse) # install.packages("tidyverse")
+library(dplyr) # install.packages("dplyr")
+library(stringi) # install.packages("stringi")
+library(maps) # install.packages("maps")
+library(ggmap) # install.packages("ggmap")
+library(ggplot2) # install.packages("ggplot2")
+library(igraph) #  install.packages("igraph")
+library(wordcloud) # install.packages("wordcloud")
+library(tidytext) # install.packages("tidytext")
+library(data.table) # install.packages("data.table")
+library(knitr) # install.packages('knitr')
+```
+
+```{r globColors, echo=FALSE}
+fillColor = "steelblue"
+fillColor2 = "#F1C40F"
+```
+
+<p>Loading business.json dataset ...</p>
+
+```{r loadBizDataSet}
+biz <- stream_in(file("~/Projects/RScripts/Data/business.json"))
+```
+
+### Short EDA of business.json dataset
+
+<h2>Top 10 Categories of Business</h2>
+
+```{r top10Categories}
+table(trimws(strsplit(unique(biz$categories), ",") %>% 
+                                unlist())) %>% as.data.frame() %>% arrange(desc(Freq)) %>%
+  rename(Category=Var1) %>% top_n(n = 10, wt = Freq) %>% 
+ggplot(aes(x=Category, y=Freq)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  geom_text(aes(label=Freq), vjust=1.6, color="white", size=2.8) +
+  theme_minimal() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Top 10 Categories of Business") + xlab("Category") + ylab("Count")
+```
+
+<h2>Stars distribution for Restaurants</h2>
+
+```{r starsDistributionRestaurants}
+biz %>% filter(grepl("restaurants", tolower(categories))) %>%
+  group_by(stars) %>% summarise(Count=n()) %>% ungroup() %>%
+  ggplot(aes(x=stars, y=Count)) +
+    geom_bar(stat='identity', colour="white", fill = fillColor) +
+    geom_text(aes(x = stars, y = 1, label = paste0("(",round(Count/1e3)," K )",sep="")),
+              hjust=0, vjust=.5, size = 4, colour = 'white',
+              fontface = 'bold') +
+    labs(x = 'Stars', y = 'Count of stars Category', 
+         title = 'Distribution of Stars Rating for Restaurants only') +
+    coord_flip() + 
+    theme_bw()
+```
+
+<h2>Map of restaurants only</h2>
+
+```{r restaurantsOnly}
+restaurants <- biz %>% filter(grepl("restaurants", tolower(categories)))
+qmplot(x = longitude, y=latitude, data=restaurants,
+       geom = "point", color = is_open)
+```
+
+<h2>Average Stars less than 3 group by city</h2>
+
+```{r starsLessThan3ByCity}
+kable(biz %>% filter(grepl("restaurants", tolower(categories))) %>% 
+  group_by(city) %>% 
+  summarise(stars_avg=mean(stars, na.rm=T)) %>% ungroup() %>%
+  filter(stars_avg < 3) %>% arrange(desc(stars_avg)) %>% top_n(10, stars_avg),
+  caption = "Stars less than 3 group by city - top 10"
+  )
+```
+
+<h2>Top Ten Cities with the most Business parties mentioned in Yelp</h2>
+
+```{r}
+biz %>%
+  group_by(city) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count)) %>%
+  ungroup() %>%
+  mutate(City = reorder(city,Count)) %>%
+  head(10) %>%
+  ggplot(aes(x = City,y = Count)) +
+  geom_bar(stat='identity',colour="white", fill = fillColor) +
+  geom_text(aes(x = City, y = 1, label = paste0("(",round(Count/1e3)," K )",sep="")),
+            hjust=0, vjust=.5, size = 4, colour = 'white',
+            fontface = 'bold') +
+  labs(x = 'City', y = 'Count of Reviews', 
+       title = 'Top Ten Cities with the most Business parties in Yelp') +
+  coord_flip() + 
+  theme_bw()
+```
+
+<h2>Top most reviewed businesses</h2>
+
+```{r display_data}
+kable(
+  biz %>% group_by(name) %>% 
+  summarise(ReviewCount=sum(review_count, na.rm=T),
+            AvgStar=round(mean(stars, na.rm=T), 2)) %>%
+  arrange(desc(ReviewCount)) %>% ungroup() %>%
+  top_n(10, ReviewCount),
+  caption = "Top 10 most reviewed businesses"
+)
+```
+
+### Naive Bayes Classifier - PySpark
+```{r}
+htmltools::includeHTML('~/Projects/RScripts/Data/Spark_Yelp.html')
+```
