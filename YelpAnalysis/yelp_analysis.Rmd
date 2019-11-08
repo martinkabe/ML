@@ -4,6 +4,10 @@ author: "Martin Kovarik"
 date: "`r format(Sys.time(), '%Y-%m-%d')`"
 output: 
   html_document:
+<<<<<<< HEAD
+=======
+    keep_md: true
+>>>>>>> 67c91dcbd8450f58be93b3fba284204a3a2f0336
     code_folding: hide
 ---
 
